@@ -209,9 +209,8 @@ func (a *Acquisition) HashFiles() error {
 	defer csvFile.Close()
 
 	csvWriter := csv.NewWriter(csvFile)
-	defer csvWriter.Flush()
 
-	_ = filepath.Walk(a.StoragePath, func(filePath string, fileInfo os.FileInfo, err error) error {
+	walkErr := filepath.Walk(a.StoragePath, func(filePath string, fileInfo os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -219,7 +218,6 @@ func (a *Acquisition) HashFiles() error {
 		if fileInfo.IsDir() {
 			return nil
 		}
-		// Makes files read only
 		os.Chmod(filePath, 0o400)
 
 		sha256, err := hashes.FileSHA256(filePath)
@@ -227,15 +225,15 @@ func (a *Acquisition) HashFiles() error {
 			return err
 		}
 
-		err = csvWriter.Write([]string{filePath, sha256})
-		if err != nil {
-			return err
-		}
-
-		return nil
+		return csvWriter.Write([]string{filePath, sha256})
 	})
 
-	return nil
+	csvWriter.Flush()
+	if err := csvWriter.Error(); err != nil {
+		return err
+	}
+
+	return walkErr
 }
 
 func (a *Acquisition) StoreInfo() error {
