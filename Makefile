@@ -127,7 +127,7 @@ download:
 	@cd /tmp && unzip -u $(PLATFORMTOOLS_DARWIN)
 	@cp $(PLATFORMTOOLS_FOLDER)/adb $(ASSETS_FOLDER)
 
-all: collector windows darwin linux
+all: windows darwin linux
 
 clean:
 	rm -rf $(BUILD_FOLDER)
