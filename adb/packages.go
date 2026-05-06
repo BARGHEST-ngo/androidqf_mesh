@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/BARGHEST-ngo/androidqf_mesh/log"
 	"github.com/avast/apkverifier"
-	"github.com/mvt-project/androidqf_ward/log"
 )
 
 type PackageFile struct {

@@ -7,9 +7,9 @@ package modules
 import (
 	"fmt"
 
-	"github.com/mvt-project/androidqf_ward/acquisition"
-	"github.com/mvt-project/androidqf_ward/adb"
-	"github.com/mvt-project/androidqf_ward/log"
+	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
+	"github.com/BARGHEST-ngo/androidqf_mesh/adb"
+	"github.com/BARGHEST-ngo/androidqf_mesh/log"
 )
 
 type GetProp struct {

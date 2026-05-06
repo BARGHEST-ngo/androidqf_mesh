@@ -11,7 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/mvt-project/androidqf_ward/log"
+	"github.com/BARGHEST-ngo/androidqf_mesh/log"
 )
 
 func (a *ADB) findExe() error {
