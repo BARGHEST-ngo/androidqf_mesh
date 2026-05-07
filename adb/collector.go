@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mvt-project/androidqf_ward/log"
-	"github.com/mvt-project/androidqf_ward/assets"
+	"github.com/BARGHEST-ngo/androidqf_mesh/assets"
+	"github.com/BARGHEST-ngo/androidqf_mesh/log"
 )
 
 type Collector struct {

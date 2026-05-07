@@ -5,10 +5,10 @@
 package modules
 
 import (
+	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
+	"github.com/BARGHEST-ngo/androidqf_mesh/adb"
+	"github.com/BARGHEST-ngo/androidqf_mesh/log"
 	"github.com/botherder/go-savetime/slice"
-	"github.com/mvt-project/androidqf_ward/acquisition"
-	"github.com/mvt-project/androidqf_ward/adb"
-	"github.com/mvt-project/androidqf_ward/log"
 )
 
 type Files struct {

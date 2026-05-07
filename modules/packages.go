@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
+	"github.com/BARGHEST-ngo/androidqf_mesh/adb"
+	"github.com/BARGHEST-ngo/androidqf_mesh/log"
+	"github.com/BARGHEST-ngo/androidqf_mesh/utils"
 	"github.com/manifoldco/promptui"
-	"github.com/mvt-project/androidqf_ward/acquisition"
-	"github.com/mvt-project/androidqf_ward/adb"
-	"github.com/mvt-project/androidqf_ward/log"
-	"github.com/mvt-project/androidqf_ward/utils"
 )
 
 const (

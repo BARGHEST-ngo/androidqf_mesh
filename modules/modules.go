@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mvt-project/androidqf_ward/acquisition"
+	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
 )
 
 type Module interface {

@@ -1,4 +1,4 @@
-module github.com/mvt-project/androidqf_ward
+module github.com/BARGHEST-ngo/androidqf_mesh
 
 go 1.23.0
 
