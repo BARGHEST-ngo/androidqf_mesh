@@ -1,8 +1,6 @@
 module github.com/BARGHEST-ngo/androidqf_mesh
 
-go 1.23.0
-
-toolchain go1.24.5
+go 1.25.0
 
 require (
 	filippo.io/age v1.2.1
