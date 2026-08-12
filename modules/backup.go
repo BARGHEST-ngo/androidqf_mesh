@@ -75,13 +75,13 @@ func (b *Backup) Run(acq *acquisition.Acquisition, fast bool) error {
 		// Traditional mode: create backup file and move to storage directory
 		err = adb.Client.Backup(arg)
 		if err != nil {
-			log.Debugf("Impossible to get backup: %w", err)
+			log.Debugf("Impossible to get backup: %v", err)
 			return err
 		}
 
 		cwd, err := os.Getwd()
 		if err != nil {
-			log.Debugf("Impossible to get current directory: %w", err)
+			log.Debugf("Impossible to get current directory: %v", err)
 			return err
 		}
 
