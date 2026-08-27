@@ -11,6 +11,9 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/botherder/go-savetime/text"
+	"github.com/google/uuid"
 )
 
 type pullToWriter interface {
@@ -46,6 +49,95 @@ func relativeDeviceChild(deviceRoot, devicePath string) (string, error) {
 	}
 
 	return rel, nil
+}
+
+func deviceAbsToLocalRel(devicePath string) (string, error) {
+	if strings.ContainsRune(devicePath, 0) {
+		return "", fmt.Errorf("unsafe device path %q", devicePath)
+	}
+
+	cleaned := path.Clean(devicePath)
+	if !path.IsAbs(cleaned) {
+		return "", fmt.Errorf("device path %q is not absolute", devicePath)
+	}
+
+	if cleaned != devicePath {
+		return "", fmt.Errorf("device path %q is not canonical", devicePath)
+	}
+
+	rel := strings.TrimPrefix(cleaned, "/")
+	if rel == "" {
+		return "", fmt.Errorf("device path %q is the root path", devicePath)
+	}
+
+	if !filepath.IsLocal(filepath.FromSlash(rel)) {
+		return "", fmt.Errorf("unsafe device path %q", devicePath)
+	}
+
+	return rel, nil
+}
+
+func safeLocalBaseName(name string) (string, error) {
+	if strings.ContainsRune(name, 0) {
+		return "", fmt.Errorf("unsafe file name %q", name)
+	}
+
+	if strings.ContainsRune(name, '/') || strings.ContainsRune(name, filepath.Separator) {
+		return "", fmt.Errorf("unsafe file name %q", name)
+	}
+
+	if name == "." || name == ".." {
+		return "", fmt.Errorf("unsafe file name %q", name)
+	}
+
+	if name != filepath.Base(name) || !filepath.IsLocal(name) {
+		return "", fmt.Errorf("unsafe file name %q", name)
+	}
+
+	return name, nil
+}
+
+func quietPullError(err error) bool {
+	if err == nil {
+		return true
+	}
+
+	msg := err.Error()
+	return text.ContainsNoCase(msg, "Permission denied") ||
+		text.ContainsNoCase(msg, "Is a directory")
+}
+
+type devicePuller interface {
+	Pull(remotePath, localPath string) (string, error)
+}
+
+func pullDeviceChildToRoot(root *os.Root, puller devicePuller, rel, devicePath string) error {
+	localRel := filepath.FromSlash(rel)
+	if !filepath.IsLocal(localRel) {
+		return fmt.Errorf("unsafe local path %q", rel)
+	}
+
+	tmpName := ".androidqf-" + uuid.NewString() + ".part"
+	out, err := puller.Pull(devicePath, filepath.Join(root.Name(), tmpName))
+	if err != nil {
+		root.Remove(tmpName)
+		if msg := strings.TrimSpace(out); msg != "" {
+			return fmt.Errorf("%v: %s", err, msg)
+		}
+		return err
+	}
+
+	if err := root.MkdirAll(filepath.Dir(localRel), 0o755); err != nil {
+		root.Remove(tmpName)
+		return fmt.Errorf("failed to create destination folders for %q: %v", rel, err)
+	}
+
+	if err := root.Rename(tmpName, localRel); err != nil {
+		root.Remove(tmpName)
+		return fmt.Errorf("failed to move %q into place: %v", rel, err)
+	}
+
+	return nil
 }
 
 func createRootFile(root *os.Root, rel string) (*os.File, error) {

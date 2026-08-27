@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -84,14 +85,42 @@ func NewEncryptedZipWriter(uuid string) (*EncryptedZipWriter, error) {
 	}, nil
 }
 
+func validateZipEntryName(name string) error {
+	if name == "" {
+		return fmt.Errorf("file name cannot be empty")
+	}
+	if strings.ContainsAny(name, "\\\x00") {
+		return fmt.Errorf("unsafe zip entry name: %q", name)
+	}
+	if path.IsAbs(name) {
+		return fmt.Errorf("unsafe zip entry name: %q", name)
+	}
+
+	first, _, _ := strings.Cut(name, "/")
+	if len(first) >= 2 && first[1] == ':' {
+		return fmt.Errorf("unsafe zip entry name: %q", name)
+	}
+
+	for _, part := range strings.Split(name, "/") {
+		if part == ".." {
+			return fmt.Errorf("unsafe zip entry name: %q", name)
+		}
+	}
+	if path.Clean(name) == "." {
+		return fmt.Errorf("unsafe zip entry name: %q", name)
+	}
+
+	return nil
+}
+
 // CreateFile creates a new file in the encrypted zip and returns a writer
 func (ezw *EncryptedZipWriter) CreateFile(name string) (io.Writer, error) {
 	if err := ezw.checkClosed(); err != nil {
 		return nil, err
 	}
 
-	if name == "" {
-		return nil, fmt.Errorf("file name cannot be empty")
+	if err := validateZipEntryName(name); err != nil {
+		return nil, err
 	}
 
 	header := &zip.FileHeader{
