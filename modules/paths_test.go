@@ -6,9 +6,11 @@ package modules
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -69,15 +71,16 @@ func TestRelativeDeviceChild(t *testing.T) {
 			got, err := relativeDeviceChild(tt.deviceRoot, tt.devicePath)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("relativeDeviceChild() error = nil, want error")
+					t.Errorf("relativeDeviceChild() error = nil, want error")
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("relativeDeviceChild() error = %v", err)
+				t.Errorf("relativeDeviceChild() error = %v", err)
+				return
 			}
 			if got != tt.want {
-				t.Fatalf("relativeDeviceChild() = %q, want %q", got, tt.want)
+				t.Errorf("relativeDeviceChild() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -104,23 +107,21 @@ func TestCreateRootFile(t *testing.T) {
 
 	got, err := os.ReadFile(filepath.Join(rootDir, "nested", "file.txt"))
 	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
-	}
-	if string(got) != "ok" {
-		t.Fatalf("created file content = %q, want %q", got, "ok")
+		t.Errorf("ReadFile() error = %v", err)
+	} else if string(got) != "ok" {
+		t.Errorf("created file content = %q, want %q", got, "ok")
 	}
 
 	file, err = createRootFile(root, "file.txt")
 	if err != nil {
-		t.Fatalf("createRootFile() root file error = %v", err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatalf("Close() root file error = %v", err)
+		t.Errorf("createRootFile() root file error = %v", err)
+	} else if err := file.Close(); err != nil {
+		t.Errorf("Close() root file error = %v", err)
 	}
 
 	if file, err := createRootFile(root, "../escape"); err == nil {
 		file.Close()
-		t.Fatal("createRootFile() error = nil, want lexical traversal rejection")
+		t.Error("createRootFile() error = nil, want lexical traversal rejection")
 	}
 }
 
@@ -146,6 +147,338 @@ func TestCreateRootFileRejectsSymlinkEscape(t *testing.T) {
 
 	if file, err := createRootFile(root, "escape/file.txt"); err == nil {
 		file.Close()
-		t.Fatal("createRootFile() error = nil, want symlink escape rejection")
+		t.Error("createRootFile() error = nil, want symlink escape rejection")
+	}
+}
+
+func TestDeviceAbsToLocalRel(t *testing.T) {
+	cases := []struct {
+		name       string
+		devicePath string
+		want       string
+		wantErr    bool
+	}{
+		{name: "plain", devicePath: "/data/anr/trace.txt", want: "data/anr/trace.txt"},
+		{name: "contains traversal", devicePath: "/data/anr/../../etc/passwd", wantErr: true},
+		{name: "escapes root", devicePath: "/../../etc/passwd", wantErr: true},
+		{name: "trailing slash", devicePath: "/data/anr/", wantErr: true},
+		{name: "double slash", devicePath: "//data/anr/trace.txt", wantErr: true},
+		{name: "relative", devicePath: "data/anr/trace.txt", wantErr: true},
+		{name: "root", devicePath: "/", wantErr: true},
+		{name: "nul byte", devicePath: "/data/anr/\x00trace.txt", wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := deviceAbsToLocalRel(tc.devicePath)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("deviceAbsToLocalRel(%q) = %q, want error", tc.devicePath, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("deviceAbsToLocalRel(%q) error = %v", tc.devicePath, err)
+				return
+			}
+			if got != tc.want {
+				t.Errorf("deviceAbsToLocalRel(%q) = %q, want %q", tc.devicePath, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSafeLocalBaseName(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{name: "plain", input: "com.example.app.apk"},
+		{name: "separator", input: "../com.example.app.apk", wantErr: true},
+		{name: "nested", input: "sub/com.example.app.apk", wantErr: true},
+		{name: "parent", input: "..", wantErr: true},
+		{name: "current", input: ".", wantErr: true},
+		{name: "empty", input: "", wantErr: true},
+		{name: "nul byte", input: "com.example\x00.apk", wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := safeLocalBaseName(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("safeLocalBaseName(%q) = %q, want error", tc.input, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("safeLocalBaseName(%q) error = %v", tc.input, err)
+				return
+			}
+			if got != tc.input {
+				t.Errorf("safeLocalBaseName(%q) = %q, want unchanged", tc.input, got)
+			}
+		})
+	}
+}
+
+type fakePuller struct {
+	pulled []string
+}
+
+func (f *fakePuller) PullToWriter(remotePath string, writer io.Writer) error {
+	f.pulled = append(f.pulled, remotePath)
+	_, err := io.WriteString(writer, "pulled:"+remotePath)
+	return err
+}
+
+func TestLogPullStaysInsideRootWhenComponentIsSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires extra privileges on Windows")
+	}
+
+	rootDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	if err := os.Symlink(outsideDir, filepath.Join(rootDir, "data")); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			t.Skipf("symlink creation not permitted: %v", err)
+		}
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		t.Fatalf("OpenRoot() error = %v", err)
+	}
+	defer root.Close()
+
+	rel, err := deviceAbsToLocalRel("/data/anr/trace.txt")
+	if err != nil {
+		t.Fatalf("deviceAbsToLocalRel() error = %v", err)
+	}
+
+	puller := &fakePuller{}
+	if err := streamDeviceChildToRoot(root, puller, rel, "/data/anr/trace.txt"); err == nil {
+		t.Error("streamDeviceChildToRoot() error = nil, want symlink escape rejection")
+	}
+
+	entries, err := os.ReadDir(outsideDir)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("wrote %d entries outside the root, want 0", len(entries))
+	}
+	if len(puller.pulled) != 0 {
+		t.Errorf("pulled %v, want no pull attempted", puller.pulled)
+	}
+}
+
+func TestLogPullRejectsNonCanonicalPath(t *testing.T) {
+	rootDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		t.Fatalf("OpenRoot() error = %v", err)
+	}
+	defer root.Close()
+
+	devicePath := "/data/anr/../../../../../../" + filepath.Base(outsideDir) + "/escaped.txt"
+	if _, err := deviceAbsToLocalRel(devicePath); err == nil {
+		t.Errorf("deviceAbsToLocalRel(%q) error = nil, want rejection", devicePath)
+	}
+
+	rel, err := deviceAbsToLocalRel("/data/anr/trace.txt")
+	if err != nil {
+		t.Fatalf("deviceAbsToLocalRel() error = %v", err)
+	}
+
+	if err := streamDeviceChildToRoot(root, &fakePuller{}, rel, "/data/anr/trace.txt"); err != nil {
+		t.Fatalf("streamDeviceChildToRoot() error = %v", err)
+	}
+
+	if entries, err := os.ReadDir(outsideDir); err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	} else if len(entries) != 0 {
+		t.Errorf("wrote %d entries outside the root, want 0", len(entries))
+	}
+
+	if _, err := os.Stat(filepath.Join(rootDir, filepath.FromSlash(rel))); err != nil {
+		t.Errorf("expected the pull to land inside the root: %v", err)
+	}
+}
+
+func TestPackageCopyNameRejectsTraversal(t *testing.T) {
+	root, err := os.OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenRoot() error = %v", err)
+	}
+	defer root.Close()
+
+	p := &Packages{}
+	for _, packageName := range []string{"../../evil", "sub/evil", "/etc/evil", "evil\x00"} {
+		if name, err := p.getLocalCopyName(root, packageName, "/data/app/base.apk"); err == nil {
+			t.Errorf("getLocalCopyName(%q) = %q, want error", packageName, name)
+		}
+	}
+
+	name, err := p.getLocalCopyName(root, "com.example.app", "/data/app/base.apk")
+	if err != nil {
+		t.Errorf("getLocalCopyName() error = %v", err)
+	} else if name != "com.example.app.apk" {
+		t.Errorf("getLocalCopyName() = %q, want com.example.app.apk", name)
+	}
+}
+
+func TestAppendListedFiles(t *testing.T) {
+	got := appendListedFiles(nil, "/data/anr/", []string{
+		"/data/anr/",
+		"/data/anr",
+		"/data/anr/trace.txt",
+		"/data/anr/sub/",
+		"",
+	})
+
+	want := []string{"/data/anr/trace.txt", "/data/anr/sub"}
+	if len(got) != len(want) {
+		t.Fatalf("appendListedFiles() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("appendListedFiles() = %v, want %v", got, want)
+			break
+		}
+	}
+}
+
+func TestQuietPullErrorKeepsResolutionFailuresLoud(t *testing.T) {
+	if !quietPullError(errors.New("adb: Permission denied")) {
+		t.Error("quietPullError(Permission denied) = false, want true")
+	}
+	if !quietPullError(errors.New("cat: /data/anr: Is a directory")) {
+		t.Error("quietPullError(Is a directory) = false, want true")
+	}
+	if quietPullError(errors.New(`failed to create destination file "escape/x": no such file or directory`)) {
+		t.Error("quietPullError(destination refused) = true, want false")
+	}
+}
+
+type fakeAdb struct {
+	pulled   [][2]string
+	failWith string
+}
+
+func (f *fakeAdb) Pull(remotePath, localPath string) (string, error) {
+	f.pulled = append(f.pulled, [2]string{remotePath, localPath})
+	if f.failWith != "" {
+		return f.failWith, errors.New("exit status 1")
+	}
+	return "", os.WriteFile(localPath, []byte("pulled:"+remotePath), 0o644)
+}
+
+func leftoverParts(t *testing.T, dir string) int {
+	t.Helper()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+
+	count := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".androidqf-") {
+			count++
+		}
+	}
+	return count
+}
+
+func TestPullDeviceChildToRootWritesInsideRoot(t *testing.T) {
+	rootDir := t.TempDir()
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		t.Fatalf("OpenRoot() error = %v", err)
+	}
+	defer root.Close()
+
+	puller := &fakeAdb{}
+	if err := pullDeviceChildToRoot(root, puller, "data/anr/trace.txt", "/data/anr/trace.txt"); err != nil {
+		t.Fatalf("pullDeviceChildToRoot() error = %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(rootDir, "data", "anr", "trace.txt"))
+	if err != nil {
+		t.Errorf("ReadFile() error = %v", err)
+	} else if string(got) != "pulled:/data/anr/trace.txt" {
+		t.Errorf("content = %q, want the pulled bytes", got)
+	}
+
+	if local := puller.pulled[0][1]; !strings.HasPrefix(filepath.Base(local), ".androidqf-") {
+		t.Errorf("adb pull destination = %q, want a generated temp name", local)
+	}
+	if n := leftoverParts(t, rootDir); n != 0 {
+		t.Errorf("%d temp files left behind, want 0", n)
+	}
+}
+
+func TestPullDeviceChildToRootRejectsSymlinkComponent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires extra privileges on Windows")
+	}
+
+	rootDir := t.TempDir()
+	outsideDir := t.TempDir()
+	if err := os.Symlink(outsideDir, filepath.Join(rootDir, "data")); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			t.Skipf("symlink creation not permitted: %v", err)
+		}
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		t.Fatalf("OpenRoot() error = %v", err)
+	}
+	defer root.Close()
+
+	if err := pullDeviceChildToRoot(root, &fakeAdb{}, "data/anr/trace.txt", "/data/anr/trace.txt"); err == nil {
+		t.Error("pullDeviceChildToRoot() error = nil, want symlink escape rejection")
+	}
+
+	entries, err := os.ReadDir(outsideDir)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("wrote %d entries outside the root, want 0", len(entries))
+	}
+	if n := leftoverParts(t, rootDir); n != 0 {
+		t.Errorf("%d temp files left behind, want 0", n)
+	}
+}
+
+func TestPullDeviceChildToRootSurfacesAdbOutput(t *testing.T) {
+	rootDir := t.TempDir()
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		t.Fatalf("OpenRoot() error = %v", err)
+	}
+	defer root.Close()
+
+	puller := &fakeAdb{failWith: "adb: error: remote open failed: Permission denied"}
+	err = pullDeviceChildToRoot(root, puller, "data/anr/trace.txt", "/data/anr/trace.txt")
+	if err == nil {
+		t.Error("pullDeviceChildToRoot() error = nil, want failure")
+	} else if !quietPullError(err) {
+		t.Errorf("quietPullError(%v) = false, want the adb message to be recognised", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(rootDir, "data")); statErr == nil {
+		t.Error("a failed pull left a destination behind")
+	}
+	if n := leftoverParts(t, rootDir); n != 0 {
+		t.Errorf("%d temp files left behind, want 0", n)
 	}
 }

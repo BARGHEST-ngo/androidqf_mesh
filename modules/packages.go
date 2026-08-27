@@ -53,32 +53,26 @@ func (p *Packages) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (p *Packages) getPathToLocalCopy(packageName, filePath string) (string, error) {
-	absApksPath, err := filepath.Abs(p.ApksPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve apks path: %v", err)
-	}
-
+func (p *Packages) getLocalCopyName(root *os.Root, packageName, filePath string) (string, error) {
 	fileName := p.extractFileName(filePath)
-	localPath := filepath.Join(p.ApksPath, fmt.Sprintf("%s%s.apk", packageName, fileName))
+	name, err := safeLocalBaseName(fmt.Sprintf("%s%s.apk", packageName, fileName))
+	if err != nil {
+		return "", fmt.Errorf("package path escapes apks directory: %s: %v", packageName, err)
+	}
 
 	counter := 0
 	for {
-		if _, err := os.Stat(localPath); os.IsNotExist(err) {
+		if _, err := root.Stat(name); os.IsNotExist(err) {
 			break
 		}
 		counter++
-		localPath = filepath.Join(
-			p.ApksPath,
-			fmt.Sprintf("%s%s_%d.apk", packageName, fileName, counter),
-		)
+		name, err = safeLocalBaseName(fmt.Sprintf("%s%s_%d.apk", packageName, fileName, counter))
+		if err != nil {
+			return "", fmt.Errorf("package path escapes apks directory: %s: %v", packageName, err)
+		}
 	}
 
-	absLocalPath, err := filepath.Abs(localPath)
-	if err != nil || !strings.HasPrefix(absLocalPath, absApksPath+string(filepath.Separator)) {
-		return "", fmt.Errorf("package path escapes apks directory: %s", packageName)
-	}
-	return localPath, nil
+	return name, nil
 }
 
 func (p *Packages) extractFileName(filePath string) string {
@@ -128,6 +122,16 @@ func (p *Packages) Run(acq *acquisition.Acquisition, fast bool) error {
 	// Otherwise we walk through the list of package, pull the files, and hash them.
 	if download != apkNone {
 
+		streaming := acq.StreamingMode && acq.EncryptedWriter != nil
+		var localRoot *os.Root
+		if !streaming {
+			localRoot, err = os.OpenRoot(p.ApksPath)
+			if err != nil {
+				return fmt.Errorf("failed to open apks output root: %v", err)
+			}
+			defer localRoot.Close()
+		}
+
 		var keepOption string
 
 		// Only ask about certificate removal for unencrypted output
@@ -160,7 +164,7 @@ func (p *Packages) Run(acq *acquisition.Acquisition, fast bool) error {
 			for ipf := 0; ipf < len(packages[ip].Files); ipf++ {
 				packageFile := &packages[ip].Files[ipf]
 
-				if acq.StreamingMode && acq.EncryptedWriter != nil {
+				if streaming {
 					// Streaming mode: stream directly to encrypted zip without temp files
 					if err := p.processAPKStreaming(packages[ip].Name, packageFile, keepOption, acq); err != nil {
 						log.Debugf("ERROR: failed to process APK %s: %v", packageFile.Path, err)
@@ -168,18 +172,19 @@ func (p *Packages) Run(acq *acquisition.Acquisition, fast bool) error {
 					}
 				} else {
 					// Traditional mode: download to local storage
-					localPath, err := p.getPathToLocalCopy(packages[ip].Name, packageFile.Path)
+					name, err := p.getLocalCopyName(localRoot, packages[ip].Name, packageFile.Path)
 					if err != nil {
 						log.Errorf("Skipping package with unsafe path %s: %v", packages[ip].Name, err)
 						continue
 					}
 
-					out, err := adb.Client.Pull(packageFile.Path, localPath)
-					if err != nil {
-						packageFile.Error = out
-						log.Debugf("ERROR: failed to download %s: %s", packageFile.Path, out)
+					if err := pullDeviceChildToRoot(localRoot, adb.Client, name, packageFile.Path); err != nil {
+						packageFile.Error = err.Error()
+						log.Debugf("ERROR: failed to download %s: %v", packageFile.Path, err)
 						continue
 					}
+
+					localPath := filepath.Join(p.ApksPath, name)
 
 					log.Debugf("Downloaded %s to %s", packageFile.Path, localPath)
 
@@ -204,7 +209,7 @@ func (p *Packages) Run(acq *acquisition.Acquisition, fast bool) error {
 								if keepOption == apkRemoveTrusted {
 									log.Debugf("Trusted APK removed: %s - %s",
 										localPath, packageFile.SHA256)
-									os.Remove(localPath)
+									localRoot.Remove(name)
 								}
 							}
 						}
