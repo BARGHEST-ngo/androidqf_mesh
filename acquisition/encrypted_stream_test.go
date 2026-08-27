@@ -29,10 +29,10 @@ func TestValidateZipEntryName(t *testing.T) {
 	for _, tt := range tests {
 		err := validateZipEntryName(tt.name)
 		if tt.wantErr && err == nil {
-			t.Fatalf("validateZipEntryName(%q) returned nil error", tt.name)
+			t.Errorf("validateZipEntryName(%q) returned nil error", tt.name)
 		}
 		if !tt.wantErr && err != nil {
-			t.Fatalf("validateZipEntryName(%q) returned unexpected error: %v", tt.name, err)
+			t.Errorf("validateZipEntryName(%q) returned unexpected error: %v", tt.name, err)
 		}
 	}
 }
