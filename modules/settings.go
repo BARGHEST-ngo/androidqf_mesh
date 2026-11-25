@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
@@ -29,11 +30,14 @@ func (s *Settings) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (s *Settings) Run(acq *acquisition.Acquisition, fast bool) error {
+func (s *Settings) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Collecting device settings...")
 
 	for _, namespace := range []string{"system", "secure", "global"} {
-		out, err := adb.Client.Shell(fmt.Sprintf("cmd settings list %s", namespace))
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		out, err := adb.Client.Shell(ctx, fmt.Sprintf("cmd settings list %s", namespace))
 		if err != nil {
 			return fmt.Errorf("failed to run `cmd settings %s`: %v", namespace, err)
 		}

@@ -6,6 +6,7 @@
 package modules
 
 import (
+	"context"
 	"strings"
 
 	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
@@ -30,7 +31,7 @@ func (r *RootBinaries) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (r *RootBinaries) Run(acq *acquisition.Acquisition, fast bool) error {
+func (r *RootBinaries) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Checking for traces of rooting")
 	root_binaries := []string{
 		"su",
@@ -46,7 +47,10 @@ func (r *RootBinaries) Run(acq *acquisition.Acquisition, fast bool) error {
 	}
 	found_root_binaries := []string{}
 	for _, binary := range root_binaries {
-		out, err := adb.Client.Shell("which -a ", binary)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		out, err := adb.Client.Shell(ctx, "which -a ", binary)
 		if err != nil {
 			// returns 1 if file not found, ignore
 			continue

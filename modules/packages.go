@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -95,10 +96,10 @@ func (p *Packages) generateZipPath(packageName, filePath string) (string, error)
 	return cleaned, nil
 }
 
-func (p *Packages) Run(acq *acquisition.Acquisition, fast bool) error {
+func (p *Packages) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Collecting information on installed apps. This might take a while...")
 
-	packages, err := adb.Client.GetPackages(fast)
+	packages, err := adb.Client.GetPackages(ctx, fast)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve list of installed packages: %v", err)
 	}
@@ -115,7 +116,7 @@ func (p *Packages) Run(acq *acquisition.Acquisition, fast bool) error {
 	}
 	_, download, err := downloadPrompt.Run()
 	if err != nil {
-		return fmt.Errorf("failed to make selection for download option: %v", err)
+		return fmt.Errorf("failed to make selection for download option: %w", promptErr(err))
 	}
 
 	// If the user decides to not download any APK, then we skip this.
@@ -147,8 +148,7 @@ func (p *Packages) Run(acq *acquisition.Acquisition, fast bool) error {
 			}
 			_, keepOption, err = promptAll.Run()
 			if err != nil {
-				return fmt.Errorf("failed to make selection for download option: %v",
-					err)
+				return fmt.Errorf("failed to make selection for download option: %w", promptErr(err))
 			}
 		}
 
@@ -162,11 +162,14 @@ func (p *Packages) Run(acq *acquisition.Acquisition, fast bool) error {
 			log.Debugf("Found Android package: %s", packages[ip].Name)
 
 			for ipf := 0; ipf < len(packages[ip].Files); ipf++ {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				packageFile := &packages[ip].Files[ipf]
 
 				if streaming {
 					// Streaming mode: stream directly to encrypted zip without temp files
-					if err := p.processAPKStreaming(packages[ip].Name, packageFile, keepOption, acq); err != nil {
+					if err := p.processAPKStreaming(ctx, packages[ip].Name, packageFile, keepOption, acq); err != nil {
 						log.Debugf("ERROR: failed to process APK %s: %v", packageFile.Path, err)
 						continue
 					}
@@ -178,7 +181,7 @@ func (p *Packages) Run(acq *acquisition.Acquisition, fast bool) error {
 						continue
 					}
 
-					if err := pullDeviceChildToRoot(localRoot, adb.Client, name, packageFile.Path); err != nil {
+					if err := pullDeviceChildToRoot(ctx, localRoot, adb.Client, name, packageFile.Path); err != nil {
 						packageFile.Error = err.Error()
 						log.Debugf("ERROR: failed to download %s: %v", packageFile.Path, err)
 						continue
@@ -223,7 +226,7 @@ func (p *Packages) Run(acq *acquisition.Acquisition, fast bool) error {
 }
 
 // processAPKStreaming handles APK processing in streaming mode
-func (p *Packages) processAPKStreaming(packageName string, packageFile *adb.PackageFile, keepOption string, acq *acquisition.Acquisition) error {
+func (p *Packages) processAPKStreaming(ctx context.Context, packageName string, packageFile *adb.PackageFile, keepOption string, acq *acquisition.Acquisition) error {
 	zipPath, err := p.generateZipPath(packageName, packageFile.Path)
 	if err != nil {
 		return err
@@ -234,7 +237,7 @@ func (p *Packages) processAPKStreaming(packageName string, packageFile *adb.Pack
 		log.Debugf("Skipping certificate check for encrypted output: %s", packageFile.Path)
 	} else {
 		// Process certificate and determine if APK should be skipped (unencrypted output only)
-		shouldSkip, err := p.processCertificate(packageFile, keepOption, acq)
+		shouldSkip, err := p.processCertificate(ctx, packageFile, keepOption, acq)
 		if err != nil {
 			packageFile.Error = fmt.Sprintf("Certificate processing failed: %v", err)
 			return err
@@ -247,7 +250,7 @@ func (p *Packages) processAPKStreaming(packageName string, packageFile *adb.Pack
 	}
 
 	// Stream APK directly to encrypted zip
-	err = acq.StreamAPKToZip(packageFile.Path, zipPath, nil)
+	err = acq.StreamAPKToZip(ctx, packageFile.Path, zipPath, nil)
 	if err != nil {
 		packageFile.Error = fmt.Sprintf("Failed to stream to encrypted archive: %v", err)
 		return err
@@ -258,9 +261,9 @@ func (p *Packages) processAPKStreaming(packageName string, packageFile *adb.Pack
 }
 
 // processCertificate handles certificate verification and returns whether APK should be skipped
-func (p *Packages) processCertificate(packageFile *adb.PackageFile, keepOption string, acq *acquisition.Acquisition) (bool, error) {
+func (p *Packages) processCertificate(ctx context.Context, packageFile *adb.PackageFile, keepOption string, acq *acquisition.Acquisition) (bool, error) {
 	// Pull APK to buffer for certificate verification
-	buffer, err := acq.StreamingPuller.PullToBuffer(packageFile.Path)
+	buffer, err := acq.StreamingPuller.PullToBuffer(ctx, packageFile.Path)
 	if err != nil {
 		return false, fmt.Errorf("failed to pull APK for certificate verification: %v", err)
 	}

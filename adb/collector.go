@@ -6,6 +6,7 @@
 package adb
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,10 +64,10 @@ type ProcessInfo struct {
 }
 
 // Returns a new Collector instance.
-func (a *ADB) GetCollector(tmpDir string, arch string) (*Collector, error) {
+func (a *ADB) GetCollector(ctx context.Context, tmpDir string, arch string) (*Collector, error) {
 	c := Collector{ExePath: filepath.Join(tmpDir, "collector"), Adb: a, Architecture: arch}
 
-	err := c.Install()
+	err := c.Install(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -75,8 +76,8 @@ func (a *ADB) GetCollector(tmpDir string, arch string) (*Collector, error) {
 }
 
 // Check if collector is installed.
-func (c *Collector) isInstalled() bool {
-	out, err := c.Adb.FileExists(c.ExePath)
+func (c *Collector) isInstalled(ctx context.Context) bool {
+	out, err := c.Adb.FileExists(ctx, c.ExePath)
 	if err != nil {
 		return false
 	}
@@ -84,15 +85,15 @@ func (c *Collector) isInstalled() bool {
 }
 
 // Clean the phone.
-func (c *Collector) Clean() error {
-	_, err := c.Adb.Shell("rm", c.ExePath)
+func (c *Collector) Clean(ctx context.Context) error {
+	_, err := c.Adb.Shell(ctx, "rm", c.ExePath)
 	return err
 }
 
 // Install the collector.
-func (c *Collector) Install() error {
-	if c.isInstalled() {
-		_, err := c.Adb.Shell("rm", c.ExePath)
+func (c *Collector) Install(ctx context.Context) error {
+	if c.isInstalled(ctx) {
+		_, err := c.Adb.Shell(ctx, "rm", c.ExePath)
 		if err != nil {
 			return err
 		}
@@ -129,11 +130,11 @@ func (c *Collector) Install() error {
 		return err
 	}
 
-	_, err = c.Adb.Push(collectorTemp.Name(), c.ExePath)
+	_, err = c.Adb.Push(ctx, collectorTemp.Name(), c.ExePath)
 	if err != nil {
 		return err
 	}
-	_, err = c.Adb.Shell("chmod", "+x", c.ExePath)
+	_, err = c.Adb.Shell(ctx, "chmod", "+x", c.ExePath)
 	if err != nil {
 		return err
 	}
@@ -142,18 +143,18 @@ func (c *Collector) Install() error {
 }
 
 // List files on the phone at the given path (no hash).
-func (c *Collector) Find(path string) ([]FileInfo, error) {
+func (c *Collector) Find(ctx context.Context, path string) ([]FileInfo, error) {
 	var results []FileInfo
 	var file FileInfo
-	if !c.isInstalled() {
-		err := c.Install()
+	if !c.isInstalled(ctx) {
+		err := c.Install(ctx)
 		if err != nil {
 			log.Debugf("Impossible to install collector: %w", err)
 			return results, err
 		}
 	}
 
-	out, err := c.Adb.Shell(c.ExePath, "find", path)
+	out, err := c.Adb.Shell(ctx, c.ExePath, "find", path)
 	if err != nil {
 		return results, err
 	}
@@ -168,18 +169,18 @@ func (c *Collector) Find(path string) ([]FileInfo, error) {
 }
 
 // List files with their hash on the phone at the given path.
-func (c *Collector) FindHash(path string) ([]FileInfo, error) {
+func (c *Collector) FindHash(ctx context.Context, path string) ([]FileInfo, error) {
 	var results []FileInfo
 	var file FileInfo
-	if !c.isInstalled() {
-		err := c.Install()
+	if !c.isInstalled(ctx) {
+		err := c.Install(ctx)
 		if err != nil {
 			log.Debugf("Impossible to install collector: %w", err)
 			return results, err
 		}
 	}
 
-	out, err := c.Adb.Shell(c.ExePath, "find", "-H", path)
+	out, err := c.Adb.Shell(ctx, c.ExePath, "find", "-H", path)
 	if err != nil {
 		return results, err
 	}
@@ -193,18 +194,18 @@ func (c *Collector) FindHash(path string) ([]FileInfo, error) {
 	return results, nil
 }
 
-func (c *Collector) Processes() ([]ProcessInfo, error) {
+func (c *Collector) Processes(ctx context.Context) ([]ProcessInfo, error) {
 	var results []ProcessInfo
 
-	if c.isInstalled() {
-		err := c.Install()
+	if c.isInstalled(ctx) {
+		err := c.Install(ctx)
 		if err != nil {
 			log.Debugf("Impossible to install collector: %w", err)
 			return results, err
 		}
 	}
 
-	out, err := c.Adb.Shell(c.ExePath, "ps")
+	out, err := c.Adb.Shell(ctx, c.ExePath, "ps")
 	if err != nil {
 		return results, err
 	}

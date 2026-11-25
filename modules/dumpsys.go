@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
@@ -29,10 +30,10 @@ func (d *Dumpsys) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (d *Dumpsys) Run(acq *acquisition.Acquisition, fast bool) error {
+func (d *Dumpsys) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Collecting device diagnostic information. This might take a while...")
 
-	out, err := adb.Client.Shell("dumpsys")
+	out, err := adb.Client.Shell(ctx, "dumpsys")
 	if err != nil {
 		return fmt.Errorf("failed to run `adb shell dumpsys`: %v", err)
 	}

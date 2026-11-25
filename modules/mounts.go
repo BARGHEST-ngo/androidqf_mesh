@@ -6,6 +6,7 @@
 package modules
 
 import (
+	"context"
 	"slices"
 	"strings"
 
@@ -31,14 +32,14 @@ func (m *Mounts) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (m *Mounts) Run(acq *acquisition.Acquisition, fast bool) error {
+func (m *Mounts) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Collecting mount information")
 
 	var mountsData []string
 
 	// Run "mount"
 	log.Debug("Running: mount")
-	out1, err1 := adb.Client.Shell("mount")
+	out1, err1 := adb.Client.Shell(ctx, "mount")
 	if err1 == nil && out1 != "" {
 		lines := strings.Split(strings.TrimSpace(out1), "\n")
 		for _, line := range lines {
@@ -52,7 +53,7 @@ func (m *Mounts) Run(acq *acquisition.Acquisition, fast bool) error {
 
 	// Run "cat /proc/mounts"
 	log.Debug("Running: cat /proc/mounts")
-	out2, err2 := adb.Client.Shell("cat /proc/mounts")
+	out2, err2 := adb.Client.Shell(ctx, "cat /proc/mounts")
 	if err2 == nil && out2 != "" {
 		lines := strings.Split(strings.TrimSpace(out2), "\n")
 		for _, line := range lines {

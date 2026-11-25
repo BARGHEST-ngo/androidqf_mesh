@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
@@ -29,10 +30,10 @@ func (s *Services) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (s *Services) Run(acq *acquisition.Acquisition, fast bool) error {
+func (s *Services) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Collecting list of services...")
 
-	out, err := adb.Client.Shell("service list")
+	out, err := adb.Client.Shell(ctx, "service list")
 	if err != nil {
 		return fmt.Errorf("failed to run `adb shell service list`: %v", err)
 	}

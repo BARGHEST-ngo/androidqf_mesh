@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -227,7 +228,7 @@ type fakePuller struct {
 	pulled []string
 }
 
-func (f *fakePuller) PullToWriter(remotePath string, writer io.Writer) error {
+func (f *fakePuller) PullToWriter(_ context.Context, remotePath string, writer io.Writer) error {
 	f.pulled = append(f.pulled, remotePath)
 	_, err := io.WriteString(writer, "pulled:"+remotePath)
 	return err
@@ -260,7 +261,7 @@ func TestLogPullStaysInsideRootWhenComponentIsSymlink(t *testing.T) {
 	}
 
 	puller := &fakePuller{}
-	if err := streamDeviceChildToRoot(root, puller, rel, "/data/anr/trace.txt"); err == nil {
+	if err := streamDeviceChildToRoot(t.Context(), root, puller, rel, "/data/anr/trace.txt"); err == nil {
 		t.Error("streamDeviceChildToRoot() error = nil, want symlink escape rejection")
 	}
 
@@ -296,7 +297,7 @@ func TestLogPullRejectsNonCanonicalPath(t *testing.T) {
 		t.Fatalf("deviceAbsToLocalRel() error = %v", err)
 	}
 
-	if err := streamDeviceChildToRoot(root, &fakePuller{}, rel, "/data/anr/trace.txt"); err != nil {
+	if err := streamDeviceChildToRoot(t.Context(), root, &fakePuller{}, rel, "/data/anr/trace.txt"); err != nil {
 		t.Fatalf("streamDeviceChildToRoot() error = %v", err)
 	}
 
@@ -371,7 +372,7 @@ type fakeAdb struct {
 	failWith string
 }
 
-func (f *fakeAdb) Pull(remotePath, localPath string) (string, error) {
+func (f *fakeAdb) Pull(_ context.Context, remotePath, localPath string) (string, error) {
 	f.pulled = append(f.pulled, [2]string{remotePath, localPath})
 	if f.failWith != "" {
 		return f.failWith, errors.New("exit status 1")
@@ -405,7 +406,7 @@ func TestPullDeviceChildToRootWritesInsideRoot(t *testing.T) {
 	defer root.Close()
 
 	puller := &fakeAdb{}
-	if err := pullDeviceChildToRoot(root, puller, "data/anr/trace.txt", "/data/anr/trace.txt"); err != nil {
+	if err := pullDeviceChildToRoot(t.Context(), root, puller, "data/anr/trace.txt", "/data/anr/trace.txt"); err != nil {
 		t.Fatalf("pullDeviceChildToRoot() error = %v", err)
 	}
 
@@ -444,7 +445,7 @@ func TestPullDeviceChildToRootRejectsSymlinkComponent(t *testing.T) {
 	}
 	defer root.Close()
 
-	if err := pullDeviceChildToRoot(root, &fakeAdb{}, "data/anr/trace.txt", "/data/anr/trace.txt"); err == nil {
+	if err := pullDeviceChildToRoot(t.Context(), root, &fakeAdb{}, "data/anr/trace.txt", "/data/anr/trace.txt"); err == nil {
 		t.Error("pullDeviceChildToRoot() error = nil, want symlink escape rejection")
 	}
 
@@ -469,7 +470,7 @@ func TestPullDeviceChildToRootSurfacesAdbOutput(t *testing.T) {
 	defer root.Close()
 
 	puller := &fakeAdb{failWith: "adb: error: remote open failed: Permission denied"}
-	err = pullDeviceChildToRoot(root, puller, "data/anr/trace.txt", "/data/anr/trace.txt")
+	err = pullDeviceChildToRoot(t.Context(), root, puller, "data/anr/trace.txt", "/data/anr/trace.txt")
 	if err == nil {
 		t.Error("pullDeviceChildToRoot() error = nil, want failure")
 	} else if !quietPullError(err) {

@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -44,7 +45,7 @@ func (t *Temp) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (t *Temp) Run(acq *acquisition.Acquisition, fast bool) error {
+func (t *Temp) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Collecting files in tmp folder...")
 
 	streaming := acq.StreamingMode && acq.EncryptedWriter != nil
@@ -61,12 +62,15 @@ func (t *Temp) Run(acq *acquisition.Acquisition, fast bool) error {
 	}
 
 	// TODO: Also check default tmp folders
-	tmpFiles, err := adb.Client.ListFiles(acq.TmpDir, true)
+	tmpFiles, err := adb.Client.ListFiles(ctx, acq.TmpDir, true)
 	if err != nil {
 		return fmt.Errorf("failed to list files in tmp: %v", err)
 	}
 
 	for _, file := range tmpFiles {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if file == acq.TmpDir {
 			continue
 		}
@@ -89,7 +93,7 @@ func (t *Temp) Run(acq *acquisition.Acquisition, fast bool) error {
 			}
 
 			// Stream temp file directly to encrypted zip using acquisition's streaming puller
-			err = acq.StreamingPuller.PullToWriter(file, writer)
+			err = acq.StreamingPuller.PullToWriter(ctx, file, writer)
 			if err != nil {
 				log.Errorf("Failed to stream temp file %s: %v\n", file, err)
 				continue
@@ -98,7 +102,7 @@ func (t *Temp) Run(acq *acquisition.Acquisition, fast bool) error {
 			log.Debugf("Streamed temp file %s directly to encrypted archive as %s", file, zipPath)
 		} else {
 			// Traditional mode: stream into a file opened relative to t.TempPath.
-			if err := streamDeviceChildToRoot(localRoot, puller, rel, file); err != nil {
+			if err := streamDeviceChildToRoot(ctx, localRoot, puller, rel, file); err != nil {
 				if !text.ContainsNoCase(err.Error(), "Permission denied") {
 					log.Errorf("Failed to pull temp file %s: %v\n", file, err)
 				}
