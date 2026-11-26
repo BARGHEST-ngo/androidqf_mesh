@@ -5,18 +5,21 @@
 package modules
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
+	"github.com/manifoldco/promptui"
 )
 
 type Module interface {
 	Name() string
 	InitStorage(storagePath string) error
-	Run(acq *acquisition.Acquisition, fast bool) error
+	Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error
 }
 
 func List() []Module {
@@ -114,4 +117,13 @@ func saveStringToFile(filePath, content string) error {
 	}
 
 	return nil
+}
+
+// promptErr reports Ctrl+C at a prompt as a cancellation. promptui puts the
+// terminal in raw mode, so Ctrl+C reaches it as input rather than as SIGINT
+func promptErr(err error) error {
+	if errors.Is(err, promptui.ErrInterrupt) {
+		return context.Canceled
+	}
+	return err
 }

@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
@@ -29,10 +30,10 @@ func (e *Environment) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (e *Environment) Run(acq *acquisition.Acquisition, fast bool) error {
+func (e *Environment) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Collecting environment...")
 
-	out, err := adb.Client.Shell("env")
+	out, err := adb.Client.Shell(ctx, "env")
 	if err != nil {
 		return fmt.Errorf("failed to run `adb shell env`: %v", err)
 	}

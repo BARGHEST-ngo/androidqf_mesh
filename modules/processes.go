@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
@@ -29,18 +30,18 @@ func (p *Processes) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (p *Processes) Run(acq *acquisition.Acquisition, fast bool) error {
+func (p *Processes) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Collecting list of running processes...")
 
 	if acq.Collector == nil {
-		out, err := adb.Client.Shell("ps -A")
+		out, err := adb.Client.Shell(ctx, "ps -A")
 		if err != nil {
 			return fmt.Errorf("failed to run `adb shell ps -A`: %v", err)
 		}
 
 		return saveStringToAcquisition(acq, "processes.txt", out)
 	} else {
-		out, err := acq.Collector.Processes()
+		out, err := acq.Collector.Processes(ctx)
 		if err != nil {
 			return err
 		}

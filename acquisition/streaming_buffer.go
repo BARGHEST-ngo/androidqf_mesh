@@ -7,6 +7,7 @@ package acquisition
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os/exec"
@@ -81,7 +82,7 @@ func NewStreamingPuller(adbPath, serial string, maxMemoryMB int) *StreamingPulle
 }
 
 // PullToBuffer pulls a file from device directly into memory buffer
-func (sp *StreamingPuller) PullToBuffer(remotePath string) (*StreamingBuffer, error) {
+func (sp *StreamingPuller) PullToBuffer(ctx context.Context, remotePath string) (*StreamingBuffer, error) {
 	if remotePath == "" {
 		return nil, fmt.Errorf("remote path cannot be empty")
 	}
@@ -93,19 +94,19 @@ func (sp *StreamingPuller) PullToBuffer(remotePath string) (*StreamingBuffer, er
 		args = append([]string{"-s", sp.serial}, args...)
 	}
 
-	cmd := exec.Command(sp.adbPath, args...)
+	cmd := exec.CommandContext(ctx, sp.adbPath, args...)
 	cmd.Stdout = buffer
 
-	err := cmd.Run()
+	err := ctxErr(ctx, cmd.Run())
 	if err != nil {
-		return nil, fmt.Errorf("failed to pull %q to buffer: %v", remotePath, err)
+		return nil, fmt.Errorf("failed to pull %q to buffer: %w", remotePath, err)
 	}
 
 	return buffer, nil
 }
 
 // PullToWriter pulls a file from device and streams it directly to a writer
-func (sp *StreamingPuller) PullToWriter(remotePath string, writer io.Writer) error {
+func (sp *StreamingPuller) PullToWriter(ctx context.Context, remotePath string, writer io.Writer) error {
 	if remotePath == "" {
 		return fmt.Errorf("remote path cannot be empty")
 	}
@@ -118,19 +119,19 @@ func (sp *StreamingPuller) PullToWriter(remotePath string, writer io.Writer) err
 		args = append([]string{"-s", sp.serial}, args...)
 	}
 
-	cmd := exec.Command(sp.adbPath, args...)
+	cmd := exec.CommandContext(ctx, sp.adbPath, args...)
 	cmd.Stdout = writer
 
-	err := cmd.Run()
+	err := ctxErr(ctx, cmd.Run())
 	if err != nil {
-		return fmt.Errorf("failed to pull %q to writer: %v", remotePath, err)
+		return fmt.Errorf("failed to pull %q to writer: %w", remotePath, err)
 	}
 
 	return nil
 }
 
 // BackupToBuffer creates a backup directly into memory buffer using exec-out
-func (sp *StreamingPuller) BackupToBuffer(arg string) (*StreamingBuffer, error) {
+func (sp *StreamingPuller) BackupToBuffer(ctx context.Context, arg string) (*StreamingBuffer, error) {
 	if arg == "" {
 		return nil, fmt.Errorf("backup argument cannot be empty")
 	}
@@ -142,19 +143,19 @@ func (sp *StreamingPuller) BackupToBuffer(arg string) (*StreamingBuffer, error) 
 		args = append([]string{"-s", sp.serial}, args...)
 	}
 
-	cmd := exec.Command(sp.adbPath, args...)
+	cmd := exec.CommandContext(ctx, sp.adbPath, args...)
 	cmd.Stdout = buffer
 
-	err := cmd.Run()
+	err := ctxErr(ctx, cmd.Run())
 	if err != nil {
-		return nil, fmt.Errorf("failed to create backup %q to buffer: %v", arg, err)
+		return nil, fmt.Errorf("failed to create backup %q to buffer: %w", arg, err)
 	}
 
 	return buffer, nil
 }
 
 // BackupToWriter creates a backup and streams it directly to a writer using exec-out
-func (sp *StreamingPuller) BackupToWriter(arg string, writer io.Writer) error {
+func (sp *StreamingPuller) BackupToWriter(ctx context.Context, arg string, writer io.Writer) error {
 	if arg == "" {
 		return fmt.Errorf("backup argument cannot be empty")
 	}
@@ -167,26 +168,26 @@ func (sp *StreamingPuller) BackupToWriter(arg string, writer io.Writer) error {
 		args = append([]string{"-s", sp.serial}, args...)
 	}
 
-	cmd := exec.Command(sp.adbPath, args...)
+	cmd := exec.CommandContext(ctx, sp.adbPath, args...)
 	cmd.Stdout = writer
 
-	err := cmd.Run()
+	err := ctxErr(ctx, cmd.Run())
 	if err != nil {
-		return fmt.Errorf("failed to create backup %q to writer: %v", arg, err)
+		return fmt.Errorf("failed to create backup %q to writer: %w", arg, err)
 	}
 
 	return nil
 }
 
 // BugreportToBuffer creates a bugreport directly into memory buffer using bugreportz
-func (sp *StreamingPuller) BugreportToBuffer() (*StreamingBuffer, error) {
-	filename, err := sp.generateBugreport()
+func (sp *StreamingPuller) BugreportToBuffer(ctx context.Context) (*StreamingBuffer, error) {
+	filename, err := sp.generateBugreport(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// Ensure cleanup happens regardless of success/failure
-	defer sp.cleanupDeviceFile(filename)
+	defer sp.cleanupDeviceFile(ctx, filename)
 
 	// Stream the bugreport file to buffer
 	buffer := NewStreamingBuffer(int(sp.maxMem / (1024 * 1024)))
@@ -196,30 +197,30 @@ func (sp *StreamingPuller) BugreportToBuffer() (*StreamingBuffer, error) {
 		streamArgs = append([]string{"-s", sp.serial}, streamArgs...)
 	}
 
-	streamCmd := exec.Command(sp.adbPath, streamArgs...)
+	streamCmd := exec.CommandContext(ctx, sp.adbPath, streamArgs...)
 	streamCmd.Stdout = buffer
 
-	err = streamCmd.Run()
+	err = ctxErr(ctx, streamCmd.Run())
 	if err != nil {
-		return nil, fmt.Errorf("failed to stream bugreport file: %v", err)
+		return nil, fmt.Errorf("failed to stream bugreport file: %w", err)
 	}
 
 	return buffer, nil
 }
 
 // BugreportToWriter creates a bugreport and streams it directly to a writer using bugreportz
-func (sp *StreamingPuller) BugreportToWriter(writer io.Writer) error {
+func (sp *StreamingPuller) BugreportToWriter(ctx context.Context, writer io.Writer) error {
 	if writer == nil {
 		return fmt.Errorf("writer cannot be nil")
 	}
 
-	filename, err := sp.generateBugreport()
+	filename, err := sp.generateBugreport(ctx)
 	if err != nil {
 		return err
 	}
 
 	// Ensure cleanup happens regardless of success/failure
-	defer sp.cleanupDeviceFile(filename)
+	defer sp.cleanupDeviceFile(ctx, filename)
 
 	// Stream the bugreport file to writer
 	streamArgs := []string{"exec-out", "cat", filename}
@@ -227,26 +228,27 @@ func (sp *StreamingPuller) BugreportToWriter(writer io.Writer) error {
 		streamArgs = append([]string{"-s", sp.serial}, streamArgs...)
 	}
 
-	streamCmd := exec.Command(sp.adbPath, streamArgs...)
+	streamCmd := exec.CommandContext(ctx, sp.adbPath, streamArgs...)
 	streamCmd.Stdout = writer
 
-	err = streamCmd.Run()
+	err = ctxErr(ctx, streamCmd.Run())
 	if err != nil {
-		return fmt.Errorf("failed to stream bugreport file: %v", err)
+		return fmt.Errorf("failed to stream bugreport file: %w", err)
 	}
 
 	return nil
 }
 
 // generateBugreport generates a bugreport on device and returns the filename
-func (sp *StreamingPuller) generateBugreport() (string, error) {
+func (sp *StreamingPuller) generateBugreport(ctx context.Context) (string, error) {
 	args := []string{"shell", "bugreportz"}
 	if sp.serial != "" {
 		args = append([]string{"-s", sp.serial}, args...)
 	}
 
-	cmd := exec.Command(sp.adbPath, args...)
+	cmd := exec.CommandContext(ctx, sp.adbPath, args...)
 	output, err := cmd.Output()
+	err = ctxErr(ctx, err)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate bugreport with bugreportz: %v", err)
 	}
@@ -263,15 +265,28 @@ func (sp *StreamingPuller) generateBugreport() (string, error) {
 }
 
 // cleanupDeviceFile removes a file from the device
-func (sp *StreamingPuller) cleanupDeviceFile(filename string) {
+func (sp *StreamingPuller) cleanupDeviceFile(ctx context.Context, filename string) {
 	if filename == "" {
 		return
 	}
+
+	// Runs deferred, possibly after ctx was cancelled, and the file must still go
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
 
 	cleanupArgs := []string{"shell", "rm", filename}
 	if sp.serial != "" {
 		cleanupArgs = append([]string{"-s", sp.serial}, cleanupArgs...)
 	}
-	cleanupCmd := exec.Command(sp.adbPath, cleanupArgs...)
+	cleanupCmd := exec.CommandContext(ctx, sp.adbPath, cleanupArgs...)
 	cleanupCmd.Run() // Ignore errors for cleanup
+}
+
+// ctxErr returns ctx's error in place of err when ctx ended the command,
+// so a cancelled command reports context.Canceled rather than "signal: killed"
+func ctxErr(ctx context.Context, err error) error {
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }

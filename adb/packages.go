@@ -6,6 +6,7 @@
 package adb
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -39,9 +40,12 @@ type Package struct {
 	ThirdParty bool          `json:"third_party"`
 }
 
-func (a *ADB) getPackageFiles(packageName string, fast bool) []PackageFile {
-	out, err := a.Shell("pm", "path", packageName)
+func (a *ADB) getPackageFiles(ctx context.Context, packageName string, fast bool) []PackageFile {
+	out, err := a.Shell(ctx, "pm", "path", packageName)
 	if err != nil {
+		if ctx.Err() != nil {
+			return []PackageFile{}
+		}
 		log.Errorf("Failed to get file paths for package %s: %v: %s", packageName, err, out)
 		return []PackageFile{}
 	}
@@ -61,7 +65,7 @@ func (a *ADB) getPackageFiles(packageName string, fast bool) []PackageFile {
 			// AndroidQF impliments md5sum, sha1sum, sha256sum and sha512sum hashing.
 			// Out of all overheads in the !fast option, this is the most problematic
 			// Since Sha256sum is the most common, we will only use that.
-			sha256Out, err := a.Shell("sha256sum", packagePath)
+			sha256Out, err := a.Shell(ctx, "sha256sum", packagePath)
 			if err == nil {
 				packageFile.SHA256 = strings.SplitN(sha256Out, " ", 2)[0]
 			}
@@ -73,12 +77,12 @@ func (a *ADB) getPackageFiles(packageName string, fast bool) []PackageFile {
 }
 
 // GetPackages returns the list of installed package names.
-func (a *ADB) GetPackages(fast bool) ([]Package, error) {
+func (a *ADB) GetPackages(ctx context.Context, fast bool) ([]Package, error) {
 	withInstaller := true
-	out, err := a.Shell("pm", "list", "packages", "-U", "-u", "-i")
+	out, err := a.Shell(ctx, "pm", "list", "packages", "-U", "-u", "-i")
 	if err != nil {
 		// Some phones do not support -i option
-		out, err = a.Shell("pm", "list", "packages", "-U", "-u")
+		out, err = a.Shell(ctx, "pm", "list", "packages", "-U", "-u")
 		if err != nil {
 			return []Package{}, fmt.Errorf("failed to launch `pm list packages` command: %v",
 				err)
@@ -90,6 +94,9 @@ func (a *ADB) GetPackages(fast bool) ([]Package, error) {
 	var installer string
 	var uid int
 	for _, line := range strings.Split(out, "\n") {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		fields := strings.Fields(line)
 		packageName := strings.TrimPrefix(strings.TrimSpace(fields[0]), "package:")
 		if withInstaller {
@@ -111,7 +118,7 @@ func (a *ADB) GetPackages(fast bool) ([]Package, error) {
 			Disabled:   false,
 			System:     false,
 			ThirdParty: false,
-			Files:      a.getPackageFiles(packageName, fast),
+			Files:      a.getPackageFiles(ctx, packageName, fast),
 		}
 
 		packages = append(packages, newPackage)
@@ -123,7 +130,10 @@ func (a *ADB) GetPackages(fast bool) ([]Package, error) {
 		{"field": "ThirdParty", "arg": "-3"},
 	}
 	for _, cmd := range cmds {
-		out, err = a.Shell("pm", "list", "packages", cmd["arg"])
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		out, err = a.Shell(ctx, "pm", "list", "packages", cmd["arg"])
 		if err != nil && out == "" {
 			log.Infof("Failed to get packages filtered by `%s`: %v: %s\n",
 				cmd["arg"], err, out)
@@ -157,8 +167,8 @@ func (a *ADB) GetPackages(fast bool) ([]Package, error) {
 
 // GetPackagePaths returns a list of file paths associated with the provided
 // package name.
-func (a *ADB) GetPackagePaths(packageName string) ([]string, error) {
-	out, err := a.Shell("pm", "path", packageName)
+func (a *ADB) GetPackagePaths(ctx context.Context, packageName string) ([]string, error) {
+	out, err := a.Shell(ctx, "pm", "path", packageName)
 	if err != nil {
 		return []string{}, fmt.Errorf("failed to launch `pm path` command: %v",
 			err)

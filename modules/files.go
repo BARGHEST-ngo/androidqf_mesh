@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
 	"github.com/BARGHEST-ngo/androidqf_mesh/adb"
 	"github.com/BARGHEST-ngo/androidqf_mesh/log"
@@ -28,14 +29,14 @@ func (f *Files) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (f *Files) Run(acq *acquisition.Acquisition, fast bool) error {
+func (f *Files) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Collecting list of files... This might take a while...")
 	var fileFounds []string
 	var fileDetails []adb.FileInfo
 
 	method := "collector"
 	if acq.Collector == nil {
-		out, _ := adb.Client.Shell("find '/' -maxdepth 1 -printf '%T@ %m %s %u %g %p\n' 2> /dev/null")
+		out, _ := adb.Client.Shell(ctx, "find '/' -maxdepth 1 -printf '%T@ %m %s %u %g %p\n' 2> /dev/null")
 		if (out == "") || (len(out) == 0) {
 			method = "findsimple"
 			log.Debug("Using simple find to collect list of files")
@@ -61,14 +62,17 @@ func (f *Files) Run(acq *acquisition.Acquisition, fast bool) error {
 	}
 
 	for _, folder := range folders {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var out []adb.FileInfo
 		var err error
 		if method == "collector" {
-			out, err = acq.Collector.Find(folder)
+			out, err = acq.Collector.Find(ctx, folder)
 		} else if method == "findfull" {
-			out, err = adb.Client.FindFullCommand(folder)
+			out, err = adb.Client.FindFullCommand(ctx, folder)
 		} else {
-			out, err = adb.Client.FindLimitedCommand(folder)
+			out, err = adb.Client.FindLimitedCommand(ctx, folder)
 		}
 
 		if err == nil {

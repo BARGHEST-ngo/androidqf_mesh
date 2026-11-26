@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -17,7 +18,7 @@ import (
 )
 
 type pullToWriter interface {
-	PullToWriter(remotePath string, writer io.Writer) error
+	PullToWriter(ctx context.Context, remotePath string, writer io.Writer) error
 }
 
 func relativeDeviceChild(deviceRoot, devicePath string) (string, error) {
@@ -108,17 +109,17 @@ func quietPullError(err error) bool {
 }
 
 type devicePuller interface {
-	Pull(remotePath, localPath string) (string, error)
+	Pull(ctx context.Context, remotePath, localPath string) (string, error)
 }
 
-func pullDeviceChildToRoot(root *os.Root, puller devicePuller, rel, devicePath string) error {
+func pullDeviceChildToRoot(ctx context.Context, root *os.Root, puller devicePuller, rel, devicePath string) error {
 	localRel := filepath.FromSlash(rel)
 	if !filepath.IsLocal(localRel) {
 		return fmt.Errorf("unsafe local path %q", rel)
 	}
 
 	tmpName := ".androidqf-" + uuid.NewString() + ".part"
-	out, err := puller.Pull(devicePath, filepath.Join(root.Name(), tmpName))
+	out, err := puller.Pull(ctx, devicePath, filepath.Join(root.Name(), tmpName))
 	if err != nil {
 		root.Remove(tmpName)
 		if msg := strings.TrimSpace(out); msg != "" {
@@ -158,14 +159,14 @@ func createRootFile(root *os.Root, rel string) (*os.File, error) {
 	return file, nil
 }
 
-func streamDeviceChildToRoot(root *os.Root, puller pullToWriter, rel, devicePath string) error {
+func streamDeviceChildToRoot(ctx context.Context, root *os.Root, puller pullToWriter, rel, devicePath string) error {
 	file, err := createRootFile(root, rel)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	if err := puller.PullToWriter(devicePath, file); err != nil {
+	if err := puller.PullToWriter(ctx, devicePath, file); err != nil {
 		return err
 	}
 

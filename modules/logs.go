@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -59,13 +60,13 @@ func appendListedFiles(dst []string, folder string, files []string) []string {
 	return dst
 }
 
-func (l *Logs) streamToArchive(acq *acquisition.Acquisition, devicePath, zipPath string) error {
+func (l *Logs) streamToArchive(ctx context.Context, acq *acquisition.Acquisition, devicePath, zipPath string) error {
 	writer, err := acq.EncryptedWriter.CreateFile(zipPath)
 	if err != nil {
 		return fmt.Errorf("failed to create zip entry: %v", err)
 	}
 
-	if err := acq.StreamingPuller.PullToWriter(devicePath, writer); err != nil {
+	if err := acq.StreamingPuller.PullToWriter(ctx, devicePath, writer); err != nil {
 		return err
 	}
 
@@ -73,7 +74,7 @@ func (l *Logs) streamToArchive(acq *acquisition.Acquisition, devicePath, zipPath
 	return nil
 }
 
-func (l *Logs) Run(acq *acquisition.Acquisition, fast bool) error {
+func (l *Logs) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Collecting system logs...")
 
 	streaming := acq.StreamingMode && acq.EncryptedWriter != nil
@@ -97,7 +98,10 @@ func (l *Logs) Run(acq *acquisition.Acquisition, fast bool) error {
 	// FIXME: needed to list files versus pulling folders?
 	var deviceLogFiles []string
 	for _, logFolder := range []string{"/data/anr/", "/data/log/", "/sdcard/log/"} {
-		files, err := adb.Client.ListFiles(logFolder, true)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		files, err := adb.Client.ListFiles(ctx, logFolder, true)
 		if err != nil {
 			log.Debugf("Impossible to get files from %s", logFolder)
 			continue
@@ -111,11 +115,14 @@ func (l *Logs) Run(acq *acquisition.Acquisition, fast bool) error {
 	}
 
 	for _, logFile := range staticLogFiles {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		rel := strings.TrimPrefix(logFile, "/")
 		log.Debugf("From: %s", logFile)
 
 		if streaming {
-			if err := l.streamToArchive(acq, logFile, path.Join("logs", rel)); err != nil {
+			if err := l.streamToArchive(ctx, acq, logFile, path.Join("logs", rel)); err != nil {
 				if !quietPullError(err) {
 					log.Errorf("Failed to stream log file %s: %v\n", logFile, err)
 				}
@@ -131,7 +138,7 @@ func (l *Logs) Run(acq *acquisition.Acquisition, fast bool) error {
 			continue
 		}
 
-		out, err := adb.Client.Pull(logFile, localPath)
+		out, err := adb.Client.Pull(ctx, logFile, localPath)
 		if err != nil {
 			if !text.ContainsNoCase(out, "Permission denied") {
 				log.Errorf("Failed to pull log file %s: %s\n", logFile, strings.TrimSpace(out))
@@ -141,6 +148,9 @@ func (l *Logs) Run(acq *acquisition.Acquisition, fast bool) error {
 	}
 
 	for _, logFile := range deviceLogFiles {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		rel, err := deviceAbsToLocalRel(logFile)
 		if err != nil {
 			log.Errorf("Skipping log file with unsafe path %s: %v\n", logFile, err)
@@ -150,7 +160,7 @@ func (l *Logs) Run(acq *acquisition.Acquisition, fast bool) error {
 		log.Debugf("From: %s", logFile)
 
 		if streaming {
-			if err := l.streamToArchive(acq, logFile, path.Join("logs", rel)); err != nil {
+			if err := l.streamToArchive(ctx, acq, logFile, path.Join("logs", rel)); err != nil {
 				if !quietPullError(err) {
 					log.Errorf("Failed to stream log file %s: %v\n", logFile, err)
 				}
@@ -160,7 +170,7 @@ func (l *Logs) Run(acq *acquisition.Acquisition, fast bool) error {
 
 		log.Debugf("To: %s", filepath.Join(l.LogsPath, filepath.FromSlash(rel)))
 
-		if err := pullDeviceChildToRoot(localRoot, adb.Client, rel, logFile); err != nil {
+		if err := pullDeviceChildToRoot(ctx, localRoot, adb.Client, rel, logFile); err != nil {
 			if !quietPullError(err) {
 				log.Errorf("Failed to pull log file %s: %v\n", logFile, err)
 			}

@@ -6,6 +6,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,20 +33,20 @@ func (b *Bugreport) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (b *Bugreport) Run(acq *acquisition.Acquisition, fast bool) error {
+func (b *Bugreport) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info(
 		"Generating a bugreport for the device...",
 	)
 
 	if acq.StreamingMode && acq.EncryptedWriter != nil {
 		// Streaming mode: stream bugreport directly to encrypted zip without temp files
-		err := acq.StreamBugreportToZip("bugreport.zip")
+		err := acq.StreamBugreportToZip(ctx, "bugreport.zip")
 		if err != nil {
 			return fmt.Errorf("failed to stream bugreport to encrypted archive: %v", err)
 		}
 	} else {
 		// Traditional mode: create bugreport file and move to storage directory
-		err := adb.Client.Bugreport()
+		err := adb.Client.Bugreport(ctx)
 		if err != nil {
 			log.Debugf("Impossible to generate bugreport: %v", err)
 			return err

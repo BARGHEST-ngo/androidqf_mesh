@@ -6,6 +6,7 @@
 package adb
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -23,7 +24,7 @@ type ADB struct {
 var Client *ADB
 
 // New returns a new ADB instance.
-func New() (*ADB, error) {
+func New(ctx context.Context) (*ADB, error) {
 	adb := ADB{}
 	err := adb.findExe()
 	if err != nil {
@@ -38,15 +39,15 @@ func New() (*ADB, error) {
 	// adb.KillServer()
 
 	// Confirm that we can call "adb devices" without errors
-	_, err = adb.Devices()
+	_, err = adb.Devices(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &adb, nil
 }
 
-func (a *ADB) SetSerial(serial string) (string, error) {
-	devices, err := a.Devices()
+func (a *ADB) SetSerial(ctx context.Context, serial string) (string, error) {
+	devices, err := a.Devices(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -75,10 +76,10 @@ func (a *ADB) SetSerial(serial string) (string, error) {
 }
 
 // List existing devices
-func (a *ADB) Devices() ([]string, error) {
+func (a *ADB) Devices(ctx context.Context) ([]string, error) {
 	var devices []string
-	out, err := exec.Command(a.ExePath, "devices").Output()
-	if err != nil {
+	out, err := exec.CommandContext(ctx, a.ExePath, "devices").Output()
+	if err = ctxErr(ctx, err); err != nil {
 		return devices, fmt.Errorf("failed to use the adb executable: %v",
 			err)
 	}
@@ -96,23 +97,20 @@ func (a *ADB) Devices() ([]string, error) {
 
 // Run a command to the given phone using exec
 // Returns string and/or error
-func (a *ADB) Exec(args ...string) ([]byte, error) {
-	if a.Serial == "" {
-		return exec.Command(a.ExePath, args...).Output()
-	} else {
-		var params []string
-		params = append(params, "-s", a.Serial)
-		params = append(params, args...)
-		return exec.Command(a.ExePath, params...).Output()
+func (a *ADB) Exec(ctx context.Context, args ...string) ([]byte, error) {
+	if a.Serial != "" {
+		args = append([]string{"-s", a.Serial}, args...)
 	}
+	out, err := exec.CommandContext(ctx, a.ExePath, args...).Output()
+	return out, ctxErr(ctx, err)
 }
 
 // GetState returns the output of `adb get-state`.
 // It is used to check whether a device is connected. If it is not, adb
 // will exit with status 1.
-func (a *ADB) GetState() (string, error) {
+func (a *ADB) GetState(ctx context.Context) (string, error) {
 	log.Debug("Starting get-state")
-	out, err := a.Exec("get-state")
+	out, err := a.Exec(ctx, "get-state")
 	if err != nil {
 		log.Debug("get-state failed")
 		return "", err
@@ -123,9 +121,9 @@ func (a *ADB) GetState() (string, error) {
 }
 
 // Shell executes a shell command through adb.
-func (a *ADB) Shell(cmd ...string) (string, error) {
+func (a *ADB) Shell(ctx context.Context, cmd ...string) (string, error) {
 	fullCmd := append([]string{"shell"}, cmd...)
-	out, err := a.Exec(fullCmd...)
+	out, err := a.Exec(ctx, fullCmd...)
 	if err != nil {
 		if out == nil {
 			return "", err
@@ -138,8 +136,8 @@ func (a *ADB) Shell(cmd ...string) (string, error) {
 }
 
 // Pull downloads a file from the device to a local path.
-func (a *ADB) Pull(remotePath, localPath string) (string, error) {
-	out, err := a.Exec("pull", remotePath, localPath)
+func (a *ADB) Pull(ctx context.Context, remotePath, localPath string) (string, error) {
+	out, err := a.Exec(ctx, "pull", remotePath, localPath)
 	if err != nil {
 		return string(out), err
 	}
@@ -148,8 +146,8 @@ func (a *ADB) Pull(remotePath, localPath string) (string, error) {
 }
 
 // Push a file on the phone
-func (a *ADB) Push(localPath, remotePath string) (string, error) {
-	out, err := a.Exec("push", localPath, remotePath)
+func (a *ADB) Push(ctx context.Context, localPath, remotePath string) (string, error) {
+	out, err := a.Exec(ctx, "push", localPath, remotePath)
 	if err != nil {
 		return string(out), err
 	}
@@ -158,21 +156,20 @@ func (a *ADB) Push(localPath, remotePath string) (string, error) {
 }
 
 // Backup generates a backup of the specified app, or of all.
-func (a *ADB) Backup(arg string) error {
-	cmd := exec.Command(a.ExePath, "backup", "-nocompress", arg)
-	return cmd.Run()
+func (a *ADB) Backup(ctx context.Context, arg string) error {
+	cmd := exec.CommandContext(ctx, a.ExePath, "backup", "-nocompress", arg)
+	return ctxErr(ctx, cmd.Run())
 }
 
 // Bugreport generates a bugreport of the the device
-func (a *ADB) Bugreport() error {
-	cmd := exec.Command(a.ExePath, "bugreport", "bugreport.zip")
-	err := cmd.Run()
-	return err
+func (a *ADB) Bugreport(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, a.ExePath, "bugreport", "bugreport.zip")
+	return ctxErr(ctx, cmd.Run())
 }
 
 // check if file exists
-func (a *ADB) FileExists(path string) (bool, error) {
-	out, err := a.Shell("[", "-f", path, "] || echo 1")
+func (a *ADB) FileExists(ctx context.Context, path string) (bool, error) {
+	out, err := a.Shell(ctx, "[", "-f", path, "] || echo 1")
 	if err != nil {
 		return false, err
 	}
@@ -183,10 +180,10 @@ func (a *ADB) FileExists(path string) (bool, error) {
 }
 
 // List files in a folder using ls, returns array of strings.
-func (a *ADB) ListFiles(remotePath string, recursive bool) ([]string, error) {
+func (a *ADB) ListFiles(ctx context.Context, remotePath string, recursive bool) ([]string, error) {
 	var remoteFiles []string
 	if recursive {
-		out, _ := a.Shell("find", remotePath, "2>", "/dev/null")
+		out, _ := a.Shell(ctx, "find", remotePath, "2>", "/dev/null")
 		if out != "" {
 			tmpFiles := strings.Split(out, "\n")
 			for _, file := range tmpFiles {
@@ -197,7 +194,7 @@ func (a *ADB) ListFiles(remotePath string, recursive bool) ([]string, error) {
 			}
 		}
 	} else {
-		out, err := a.Shell("ls", remotePath)
+		out, err := a.Shell(ctx, "ls", remotePath)
 		if err != nil {
 			return remoteFiles, err
 		}
@@ -211,9 +208,9 @@ func (a *ADB) ListFiles(remotePath string, recursive bool) ([]string, error) {
 	return remoteFiles, nil
 }
 
-func (a *ADB) KillServer() (string, error) {
+func (a *ADB) KillServer(ctx context.Context) (string, error) {
 	log.Debug("Killing adb server")
-	out, err := exec.Command(a.ExePath, "kill-server").Output()
+	out, err := exec.CommandContext(ctx, a.ExePath, "kill-server").Output()
 	if err != nil {
 		log.Debug("kill-server failed")
 		return "", err
@@ -221,4 +218,13 @@ func (a *ADB) KillServer() (string, error) {
 
 	log.Debug("kill-server ok")
 	return strings.TrimSpace(string(out)), nil
+}
+
+// ctxErr returns ctx's error in place of err when ctx ended the command,
+// so a cancelled command reports context.Canceled rather than "signal: killed"
+func ctxErr(ctx context.Context, err error) error {
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }

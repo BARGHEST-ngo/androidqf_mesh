@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
@@ -29,10 +30,10 @@ func (l *Logcat) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (l *Logcat) Run(acq *acquisition.Acquisition, fast bool) error {
+func (l *Logcat) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Collecting logcat...")
 
-	out, err := adb.Client.Shell("logcat", "-d", "-b", "all", "\"*:V\"")
+	out, err := adb.Client.Shell(ctx, "logcat", "-d", "-b", "all", "\"*:V\"")
 	if err != nil {
 		return fmt.Errorf("failed to run `adb shell logcat`: %v", err)
 	}
@@ -43,7 +44,7 @@ func (l *Logcat) Run(acq *acquisition.Acquisition, fast bool) error {
 	}
 
 	// logcat from before reboot
-	out, err = adb.Client.Shell("logcat", "-L", "-b", "all", "\"*:V\"")
+	out, err = adb.Client.Shell(ctx, "logcat", "-L", "-b", "all", "\"*:V\"")
 	if err != nil {
 		// Often fails, totally normal
 		log.Debugf("failed to run `adb shell logcat -L`: %v", err)

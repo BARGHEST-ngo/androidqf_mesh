@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
@@ -29,10 +30,10 @@ func (g *GetProp) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (g *GetProp) Run(acq *acquisition.Acquisition, fast bool) error {
+func (g *GetProp) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Collecting device properties...")
 
-	out, err := adb.Client.Shell("getprop")
+	out, err := adb.Client.Shell(ctx, "getprop")
 	if err != nil {
 		return fmt.Errorf("failed to run `adb shell getprop`: %v", err)
 	}

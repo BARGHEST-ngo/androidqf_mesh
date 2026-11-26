@@ -5,6 +5,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
@@ -29,10 +30,10 @@ func (s *SELinux) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (s *SELinux) Run(acq *acquisition.Acquisition, fast bool) error {
+func (s *SELinux) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Collecting SELinux status...")
 
-	out, err := adb.Client.Shell("getenforce")
+	out, err := adb.Client.Shell(ctx, "getenforce")
 	if err != nil {
 		return fmt.Errorf("failed to run `adb shell getenforce`: %v", err)
 	}

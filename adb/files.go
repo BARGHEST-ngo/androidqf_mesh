@@ -6,14 +6,15 @@
 package adb
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
 )
 
-func (a *ADB) FindFullCommand(path string) ([]FileInfo, error) {
+func (a *ADB) FindFullCommand(ctx context.Context, path string) ([]FileInfo, error) {
 	var results []FileInfo
-	out, err := a.Shell("find", fmt.Sprintf("'%s'", path), "-type", "f", "-printf", "'%T@ %m %s %u %g %p\n'", "2>", "/dev/null")
+	out, err := a.Shell(ctx, "find", fmt.Sprintf("'%s'", path), "-type", "f", "-printf", "'%T@ %m %s %u %g %p\n'", "2>", "/dev/null")
 
 	if err != nil {
 		return results, err
@@ -44,9 +45,9 @@ func (a *ADB) FindFullCommand(path string) ([]FileInfo, error) {
 	return results, nil
 }
 
-func (a *ADB) FindLimitedCommand(path string) ([]FileInfo, error) {
+func (a *ADB) FindLimitedCommand(ctx context.Context, path string) ([]FileInfo, error) {
 	var results []FileInfo
-	out, err := a.Shell("find", fmt.Sprintf("'%s'", path), "-type", "f", "2>", "/dev/null")
+	out, err := a.Shell(ctx, "find", fmt.Sprintf("'%s'", path), "-type", "f", "2>", "/dev/null")
 	if err != nil {
 		return results, err
 	}

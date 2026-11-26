@@ -6,6 +6,7 @@
 package acquisition
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,9 @@ import (
 	rt "github.com/botherder/go-savetime/runtime"
 	"github.com/google/uuid"
 )
+
+// cleanupTimeout bounds the device cleanup in Complete
+const cleanupTimeout = 30 * time.Second
 
 // Acquisition is the main object containing all phone information
 type Acquisition struct {
@@ -42,7 +46,7 @@ type Acquisition struct {
 }
 
 // New returns a new Acquisition instance.
-func New(path string) (*Acquisition, error) {
+func New(ctx context.Context, path string) (*Acquisition, error) {
 	acq := Acquisition{
 		UUID:             uuid.New().String(),
 		Started:          time.Now().UTC(),
@@ -68,12 +72,12 @@ func New(path string) (*Acquisition, error) {
 	}
 
 	// Get system information first to get tmp folder
-	err = acq.GetSystemInformation()
+	err = acq.GetSystemInformation(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	coll, err := adb.Client.GetCollector(acq.TmpDir, acq.Cpu)
+	coll, err := adb.Client.GetCollector(ctx, acq.TmpDir, acq.Cpu)
 	if err != nil {
 		// Collector install failed, will use find instead
 		log.Debugf("failed to upload collector: %v", err)
@@ -110,6 +114,10 @@ func New(path string) (*Acquisition, error) {
 }
 
 func (a *Acquisition) Complete() {
+	// Cleanup must still run after the acquisition was cancelled, so it gets its own context
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	defer cancel()
+
 	a.Completed = time.Now().UTC()
 
 	// Handle streaming mode completion
@@ -148,17 +156,17 @@ func (a *Acquisition) Complete() {
 	}
 
 	if a.Collector != nil {
-		a.Collector.Clean()
+		a.Collector.Clean(ctx)
 	}
 
-	// Stop ADB server before trying to remove extracted assets
-	adb.Client.KillServer()
+	// Don't kill the adb server here: no adb binary is extracted, and in MESH
+	// killing it drops every device's wireless ADB session
 	assets.CleanAssets()
 }
 
-func (a *Acquisition) GetSystemInformation() error {
+func (a *Acquisition) GetSystemInformation(ctx context.Context) error {
 	// Get architecture information
-	out, err := adb.Client.Shell("getprop ro.product.cpu.abi")
+	out, err := adb.Client.Shell(ctx, "getprop ro.product.cpu.abi")
 	if err != nil {
 		return err
 	}
@@ -166,7 +174,7 @@ func (a *Acquisition) GetSystemInformation() error {
 	log.Debugf("CPU architecture: %s", a.Cpu)
 
 	// Get tmp folder
-	out, err = adb.Client.Shell("env")
+	out, err = adb.Client.Shell(ctx, "env")
 	if err != nil {
 		return fmt.Errorf("failed to run `adb shell env`: %v", err)
 	}
@@ -262,7 +270,7 @@ func (a *Acquisition) StoreInfo() error {
 }
 
 // StreamAPKToZip streams an APK file directly to encrypted zip with certificate processing
-func (a *Acquisition) StreamAPKToZip(remotePath, zipPath string, processFunc func(io.Reader) error) error {
+func (a *Acquisition) StreamAPKToZip(ctx context.Context, remotePath, zipPath string, processFunc func(io.Reader) error) error {
 	if err := a.validateStreamingMode(); err != nil {
 		return err
 	}
@@ -275,9 +283,9 @@ func (a *Acquisition) StreamAPKToZip(remotePath, zipPath string, processFunc fun
 	}
 
 	// Pull APK data to memory buffer
-	buffer, err := a.StreamingPuller.PullToBuffer(remotePath)
+	buffer, err := a.StreamingPuller.PullToBuffer(ctx, remotePath)
 	if err != nil {
-		return fmt.Errorf("failed to pull APK %q: %v", remotePath, err)
+		return fmt.Errorf("failed to pull APK %q: %w", remotePath, err)
 	}
 
 	// Process APK if processor provided (e.g., certificate verification)
@@ -298,7 +306,7 @@ func (a *Acquisition) StreamAPKToZip(remotePath, zipPath string, processFunc fun
 }
 
 // StreamBackupToZip streams a backup directly to encrypted zip
-func (a *Acquisition) StreamBackupToZip(arg, zipPath string) error {
+func (a *Acquisition) StreamBackupToZip(ctx context.Context, arg, zipPath string) error {
 	if err := a.validateStreamingMode(); err != nil {
 		return err
 	}
@@ -317,16 +325,16 @@ func (a *Acquisition) StreamBackupToZip(arg, zipPath string) error {
 	}
 
 	// Stream backup directly to zip
-	err = a.StreamingPuller.BackupToWriter(arg, writer)
+	err = a.StreamingPuller.BackupToWriter(ctx, arg, writer)
 	if err != nil {
-		return fmt.Errorf("failed to stream backup %q to zip: %v", arg, err)
+		return fmt.Errorf("failed to stream backup %q to zip: %w", arg, err)
 	}
 
 	return nil
 }
 
 // StreamBugreportToZip streams a bugreport directly to encrypted zip
-func (a *Acquisition) StreamBugreportToZip(zipPath string) error {
+func (a *Acquisition) StreamBugreportToZip(ctx context.Context, zipPath string) error {
 	if err := a.validateStreamingMode(); err != nil {
 		return err
 	}
@@ -342,9 +350,9 @@ func (a *Acquisition) StreamBugreportToZip(zipPath string) error {
 	}
 
 	// Stream bugreport directly to zip
-	err = a.StreamingPuller.BugreportToWriter(writer)
+	err = a.StreamingPuller.BugreportToWriter(ctx, writer)
 	if err != nil {
-		return fmt.Errorf("failed to stream bugreport to zip: %v", err)
+		return fmt.Errorf("failed to stream bugreport to zip: %w", err)
 	}
 
 	return nil

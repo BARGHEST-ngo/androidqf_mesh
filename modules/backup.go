@@ -6,6 +6,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,7 +40,7 @@ func (b *Backup) InitStorage(storagePath string) error {
 	return nil
 }
 
-func (b *Backup) Run(acq *acquisition.Acquisition, fast bool) error {
+func (b *Backup) Run(ctx context.Context, acq *acquisition.Acquisition, fast bool) error {
 	log.Info("Would you like to take a backup of the device?")
 	promptBackup := promptui.Select{
 		Label: "Backup",
@@ -47,7 +48,7 @@ func (b *Backup) Run(acq *acquisition.Acquisition, fast bool) error {
 	}
 	_, backupOption, err := promptBackup.Run()
 	if err != nil {
-		return fmt.Errorf("failed to make selection for backup option: %v", err)
+		return fmt.Errorf("failed to make selection for backup option: %w", promptErr(err))
 	}
 
 	var arg string
@@ -67,13 +68,13 @@ func (b *Backup) Run(acq *acquisition.Acquisition, fast bool) error {
 
 	if acq.StreamingMode && acq.EncryptedWriter != nil {
 		// Streaming mode: stream backup directly to encrypted zip without temp files
-		err = acq.StreamBackupToZip(arg, "backup.ab")
+		err = acq.StreamBackupToZip(ctx, arg, "backup.ab")
 		if err != nil {
 			return fmt.Errorf("failed to stream backup to encrypted archive: %v", err)
 		}
 	} else {
 		// Traditional mode: create backup file and move to storage directory
-		err = adb.Client.Backup(arg)
+		err = adb.Client.Backup(ctx, arg)
 		if err != nil {
 			log.Debugf("Impossible to get backup: %v", err)
 			return err

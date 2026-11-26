@@ -6,9 +6,12 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"time"
 
 	"github.com/BARGHEST-ngo/androidqf_mesh/acquisition"
@@ -81,29 +84,38 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Ctrl+C cancels the acquisition, a second one exits immediately
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	context.AfterFunc(ctx, stop)
+
 	log.Debug("Starting androidqf")
-	adb.Client, err = adb.New()
+	adb.Client, err = adb.New(ctx)
 	if err != nil {
 		log.Fatal("Impossible to initialize ADB: ", err)
 	}
 
 	// Initialization
 	for {
-		serial, err = adb.Client.SetSerial(serial)
+		serial, err = adb.Client.SetSerial(ctx, serial)
 		if err != nil {
 			log.Error(fmt.Sprintf("Error trying to connect over ADB: %s", err))
 		} else {
-			_, err = adb.Client.GetState()
+			_, err = adb.Client.GetState(ctx)
 			if err == nil {
 				break
 			}
 			log.Debug(err)
 			log.Error("Unable to get device state. Please make sure it is connected and authorized. Trying again in 5 seconds...")
 		}
-		time.Sleep(5 * time.Second)
+		select {
+		case <-time.After(5 * time.Second):
+		case <-ctx.Done():
+			return
+		}
 	}
 
-	acq, err := acquisition.New(output_folder)
+	acq, err := acquisition.New(ctx, output_folder)
 	if err != nil {
 		log.Debug(err)
 		log.FatalExc("Impossible to initialise the acquisition", err)
@@ -112,8 +124,14 @@ func main() {
 	// Start acquisitions
 	log.Info(fmt.Sprintf("Started new acquisition in %s", acq.StoragePath))
 
+	cancelled := false
+
 	mods := modules.List()
 	for _, mod := range mods {
+		if ctx.Err() != nil {
+			cancelled = true
+			break
+		}
 		if (module != "") && (module != mod.Name()) {
 			continue
 		}
@@ -127,10 +145,26 @@ func main() {
 			continue
 		}
 
-		err = mod.Run(acq, fast)
+		err = mod.Run(ctx, acq, fast)
+		// ctx is not cancelled when Ctrl+C was pressed at a prompt
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			cancelled = true
+			break
+		}
 		if err != nil {
 			log.Infof("ERROR: failed to run module %s: %v", mod.Name(), err)
 		}
+	}
+
+	if cancelled || ctx.Err() != nil {
+		// Still close the archive and clean the device, but don't hash or package partial data
+		savedTo := acq.StoragePath
+		if acq.StreamingMode && acq.EncryptedWriter != nil {
+			savedTo = acq.EncryptedWriter.GetOutputPath() // Complete removes StoragePath
+		}
+		acq.Complete()
+		log.Warningf("Acquisition cancelled, partial data left in %s", savedTo)
+		return
 	}
 
 	if acq.StreamingMode {
